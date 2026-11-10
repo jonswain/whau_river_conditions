@@ -1,0 +1,67 @@
+# Refresh Whau Stream flow from LAWA and publish docs/ (flow.json) with GitHub Pages.
+# Served at https://jonswain.github.io/whau_river_conditions/flow.json, the same origin as the
+# blog page, so no CORS setup is needed.
+#
+# One-time setup: repo Settings -> Pages -> Source: "GitHub Actions".
+# Every 30 min: fetch 7 days of flow and deploy (no commit, so history stays clean).
+# Weekly (Mon 03:17 UTC): also recompute the 1-year baseline and commit data/flow_baseline.json.
+name: flow
+
+on:
+  schedule:
+    - cron: "7,37 * * * *"
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+    inputs:
+      baseline:
+        description: "Recompute the 1-year baseline"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: flow
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Restore last published flow.json (fallback if LAWA is down)
+        run: curl -fsSL "https://jonswain.github.io/whau_river_conditions/flow.json" -o docs/flow.json || true
+      - name: Fetch flow
+        env:
+          BASELINE: ${{ github.event.schedule == '17 3 * * 1' || inputs.baseline }}
+        run: |
+          if [ "$BASELINE" = "true" ]; then
+            python scripts/fetch_flow.py --baseline
+          else
+            python scripts/fetch_flow.py
+          fi
+      - name: Commit refreshed baseline
+        run: |
+          if ! git diff --quiet -- data/flow_baseline.json; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898299+github-actions[bot]@users.noreply.github.com"
+            git add data/flow_baseline.json
+            git commit -m "Refresh Whau flow baseline"
+            git push
+          fi
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+      - id: deploy
+        uses: actions/deploy-pages@v4

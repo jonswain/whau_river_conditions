@@ -1,0 +1,702 @@
+<title>Whau River Conditions</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Public+Sans:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: one column. Time picker, then a four-chip verdict (tide, stream, wind, light), then one
+   panel per source. Same tokens as the Erg Test Calculator page; status uses good/warn/bad. */
+:root {
+  --bg: #f4f7f7; --surface: #fbfcfc; --ink: #0f262c; --ink-2: #44585d; --muted: #7d8c8f;
+  --rule: #dbe3e3; --axis: #b9c6c7;
+  --accent: #0b6b72; --accent-soft: #d7ecec; --band: rgb(11 107 114 / .16);
+  --buoy: #d9541a;
+  --night: rgb(15 38 44 / .07);
+  --good: #1a7f4e; --good-soft: #daf0e3;
+  --warn: #9a6400; --warn-soft: #fbefd6;
+  --bad: #b3261e; --bad-soft: #f8dcd9;
+  --f-display: "Barlow Condensed", "Arial Narrow", "Helvetica Neue", sans-serif;
+  --f-body: "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1719; --surface: #142023; --ink: #e6eeee; --ink-2: #b4c3c5; --muted: #7f9294;
+    --rule: #24363a; --axis: #3a5155; --accent: #4fb8bd; --accent-soft: #173a3d; --band: rgb(79 184 189 / .2);
+    --buoy: #f07a43; --night: rgb(0 0 0 / .28);
+    --good: #4cc68a; --good-soft: #143424; --warn: #e0a83a; --warn-soft: #33290f; --bad: #ef6b60; --bad-soft: #3d1715;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e1719; --surface: #142023; --ink: #e6eeee; --ink-2: #b4c3c5; --muted: #7f9294;
+  --rule: #24363a; --axis: #3a5155; --accent: #4fb8bd; --accent-soft: #173a3d; --band: rgb(79 184 189 / .2);
+  --buoy: #f07a43; --night: rgb(0 0 0 / .28);
+  --good: #4cc68a; --good-soft: #143424; --warn: #e0a83a; --warn-soft: #33290f; --bad: #ef6b60; --bad-soft: #3d1715;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { background: var(--bg); color: var(--ink); font: 16px/1.5 var(--f-body); margin: 0; }
+.wrap { max-width: 980px; margin: 0 auto; padding: 24px 16px 72px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 22px; }
+.wrap > *, section.panel > * { min-width: 0; }
+h1, h2 { font-family: var(--f-display); font-weight: 700; line-height: 1.05; margin: 0; }
+h1 { font-size: clamp(2.3rem, 7vw, 3.6rem); letter-spacing: -0.01em; }
+h2 { font-size: 1.6rem; }
+p { margin: 0; }
+.eyebrow { font: 600 0.74rem/1 var(--f-body); letter-spacing: 0.13em; text-transform: uppercase; color: var(--muted); }
+.mono { font-family: var(--f-mono); font-variant-numeric: tabular-nums; }
+.muted { color: var(--muted); }
+.note { font-size: 0.86rem; color: var(--muted); }
+header.top { display: grid; gap: 10px; }
+
+/* time picker */
+.when { display: grid; gap: 10px; padding: 14px 16px; background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; }
+.when .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.when button, .when input { font: 600 0.9rem var(--f-body); color: var(--ink-2); background: var(--bg); border: 1px solid var(--axis); border-radius: 999px; padding: 7px 13px; cursor: pointer; }
+.when input { border-radius: 6px; font-family: var(--f-mono); font-weight: 400; color: var(--ink); cursor: text; min-width: 0; }
+.when button[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.when button:focus-visible, .when input:focus-visible, summary:focus-visible, .set input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.when .sel { font: 600 1.25rem/1.2 var(--f-display); letter-spacing: .01em; }
+.when .share { margin-left: auto; font-weight: 600; font-size: .85rem; border-radius: 6px; }
+
+/* verdict chips */
+.verdict { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 760px) { .verdict { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 480px) { .verdict { grid-template-columns: minmax(0, 1fr); } }
+.chip { display: grid; gap: 3px; align-content: start; padding: 12px 14px; border-radius: 8px; background: var(--surface); border: 1px solid var(--rule); border-top: 4px solid var(--c, var(--axis)); }
+.chip .k { font: 600 0.72rem/1 var(--f-body); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.chip .v { font: 700 1.5rem/1.1 var(--f-display); color: var(--c, var(--ink)); }
+.chip .s { font-size: 0.9rem; color: var(--ink-2); }
+.chip .s b { color: var(--c); font-weight: 600; }
+.good { --c: var(--good); --cs: var(--good-soft); }
+.warn { --c: var(--warn); --cs: var(--warn-soft); }
+.bad  { --c: var(--bad);  --cs: var(--bad-soft); }
+.na   { --c: var(--axis); --cs: var(--bg); }
+.tag { display: inline-block; font: 600 0.72rem/1 var(--f-body); letter-spacing: .06em; text-transform: uppercase; color: var(--c); background: var(--cs); border-radius: 999px; padding: 4px 8px; vertical-align: 2px; }
+.summary { font: 500 1.15rem/1.4 var(--f-body); color: var(--ink-2); text-wrap: pretty; }
+.summary b { color: var(--ink); font-weight: 600; }
+
+/* panels */
+section.panel { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 16px; min-width: 0; }
+.ph { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: baseline; justify-content: space-between; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px 16px; }
+.stat { display: grid; gap: 2px; }
+.stat .k { font: 600 0.7rem/1.2 var(--f-body); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.stat .v { font: 600 1.3rem/1.15 var(--f-mono); font-variant-numeric: tabular-nums; }
+.stat .s { font-size: 0.84rem; color: var(--ink-2); }
+.chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+.chart text { fill: var(--muted); font: 11px var(--f-body); }
+.chart .lbl { fill: var(--ink-2); font: 600 11px var(--f-mono); }
+.chart .grid { stroke: var(--rule); stroke-width: 1; }
+.chart .thr { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 4 4; }
+.chart .now { stroke: var(--buoy); stroke-width: 1.5; }
+.legend { display: flex; align-items: center; gap: 8px; font-size: 0.86rem; color: var(--ink-2); margin: -4px 0 0; }
+.legend i { width: 14px; height: 10px; border-radius: 2px; background: var(--good-soft); border: 1px solid var(--good); flex: none; }
+.msg { padding: 12px; border-radius: 6px; background: var(--warn-soft); color: var(--warn); font-size: 0.9rem; }
+
+/* hourly weather strip */
+.strip { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(64px, 1fr); gap: 4px; overflow-x: auto; padding-bottom: 4px; }
+.hr { display: grid; justify-items: center; gap: 3px; padding: 8px 4px; border-radius: 6px; border: 1px solid transparent; font-size: 0.82rem; }
+.hr.on { border-color: var(--buoy); background: var(--bg); }
+.hr .t { font: 600 0.78rem var(--f-body); color: var(--muted); }
+.hr .w { font: 600 0.95rem var(--f-mono); }
+.hr .g, .hr .r, .hr .c { color: var(--ink-2); font-family: var(--f-mono); font-size: 0.78rem; }
+.hr svg { width: 22px; height: 22px; }
+.hr .arrow { fill: var(--ink); }
+.hr.warn .w { color: var(--warn); } .hr.bad .w { color: var(--bad); }
+
+details.set { background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 12px 16px; }
+details.set summary { cursor: pointer; font-weight: 600; color: var(--ink-2); }
+.set .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-top: 12px; }
+.set label { display: grid; gap: 4px; font: 600 0.74rem/1.2 var(--f-body); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.set input { font: 1rem var(--f-mono); color: var(--ink); background: var(--bg); border: 1px solid var(--axis); border-radius: 4px; padding: 7px 9px; width: 7em; }
+.set .hint { font: 400 0.84rem/1.4 var(--f-body); letter-spacing: 0; text-transform: none; color: var(--muted); }
+.set button { font: 600 0.85rem var(--f-body); background: var(--bg); color: var(--ink-2); border: 1px solid var(--axis); border-radius: 6px; padding: 6px 12px; cursor: pointer; margin-top: 12px; }
+footer { display: grid; gap: 8px; font-size: 0.86rem; color: var(--muted); border-top: 1px solid var(--rule); padding-top: 16px; }
+footer a { color: var(--ink-2); }
+@media (max-width: 520px) { .when .share { margin-left: 0; } .chip .v { font-size: 1.35rem; } }
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <span class="eyebrow">West End Rowing Club · Whau River, Tāmaki Makaurau</span>
+    <h1>Whau River Conditions</h1>
+    <p class="note">Tide, stream flow, wind and light for the river at Saunders Reserve, now or at any time up to two weeks ahead.</p>
+  </header>
+
+  <div class="when" role="group" aria-label="Choose a time">
+    <div class="row" id="quick"></div>
+    <div class="row">
+      <input type="datetime-local" id="pick" aria-label="Date and time (NZ)">
+      <span class="sel" id="selLabel"></span>
+      <button class="share" id="share" type="button">Copy link</button>
+    </div>
+  </div>
+
+  <div class="verdict" id="verdict" aria-live="polite"></div>
+  <p class="summary" id="summary"></p>
+
+  <section class="panel" id="tide">
+    <div class="ph"><h2>Tide</h2><span class="note" id="tideNote"></span></div>
+    <div class="stats" id="tideStats"></div>
+    <div class="chart" id="tideChart"></div>
+    <p class="legend"><i></i><span id="sbLegend">Above S-bend accessible: within 2 h of high water (club rule)</span></p>
+  </section>
+
+  <section class="panel" id="stream">
+    <div class="ph"><h2>Whau Stream</h2><span class="note" id="flowAge"></span></div>
+    <div class="stats" id="flowStats"></div>
+    <p id="flowText"></p>
+    <div class="chart" id="flowChart"></div>
+  </section>
+
+  <section class="panel" id="weather">
+    <div class="ph"><h2>Wind &amp; weather</h2><span class="note" id="wxNote"></span></div>
+    <div class="stats" id="wxStats"></div>
+    <div class="strip" id="wxStrip" aria-label="Hourly forecast"></div>
+  </section>
+
+  <details class="set">
+    <summary>Settings</summary>
+    <div class="grid2">
+      <label>Tide time offset (min)
+        <input type="number" id="setOffset" step="5" min="-90" max="90">
+        <span class="hint">Added to the Auckland (Waitematā) tide times. Start at 0 and adjust until high water matches what you see at the club.</span>
+      </label>
+    </div>
+    <button type="button" id="setReset">Reset to default</button>
+    <p class="note" style="margin-top:8px">Saved in this browser only.</p>
+  </details>
+
+  <footer>
+    <p><b>Sources.</b> Tides: <a href="https://www.linz.govt.nz/products-services/tides-and-tidal-streams/tide-predictions">LINZ</a> predictions for the Auckland standard port (Waitematā), not a Whau gauge, so times are shifted by the offset above. Stream: Auckland Council's Whau flow gauge via <a id="flowSrc" href="https://www.lawa.org.nz/explore-data/auckland-region/water-quantity/monitoring-sites/whau-flow">LAWA</a> (provisional data, refreshed about every 30 min). Weather: <a href="https://open-meteo.com/">Open-Meteo</a> forecast model. Dawn and dusk are civil twilight, calculated here.</p>
+    <p>A planning aid, not a safety call. Check the river yourself and follow the club's safety rules.</p>
+  </footer>
+</div>
+
+<script>
+const DATA = /*DATA*/null;
+
+// ---- Config (tune these) -----------------------------------------------------------------
+const CFG = {
+  lat: -36.8792, lon: 174.6642,                 // Saunders Reserve, Rosebank Peninsula
+  tideOffsetMin: 0,                             // default Whau offset from Auckland tide times
+  sBendHours: 2,                                // club rule: above the S-bend only within this many hours of high water
+  // Harbour (a starting guess: tune once you have a feel for it). Wind speed is scaled by how
+  // much open water that direction has to the Whau mouth, then graded.
+  harbour: {
+    exposure: [                                 // [from°, to°, factor, why], wind "from" bearings, clockwise
+      [345, 100, 1.3, "long fetch down the harbour"],
+      [100, 135, 1.0, "some fetch"],
+      [135, 300, 0.7, "sheltered by land"],
+      [300, 345, 1.0, "fetch across the upper harbour"],
+    ],
+    good: 8, warn: 14,                          // effective km/h: "quite still" is needed for flat water
+    gustGood: 18, gustWarn: 28,                 // gust km/h
+    ebbTo: 65,                                  // rough direction the ebb runs at the Whau mouth (towards the Bridge)
+  },
+  windTide: { minWind: 10, minRate: 0.2, arc: 50 }, // km/h, m/h of tide change, ± degrees counted as "against"
+  downstreamBearing: 20,                        // heading from the club towards the harbour, degrees true
+  wind: { warn: 22, bad: 33 },                  // sustained km/h
+  gust: { warn: 37, bad: 46 },                  // gust km/h
+  flowFlood: 5,                                 // m3/s: call it a flood above this
+  flowUrl: "https://jonswain.github.io/whau_river_conditions/flow.json",
+};
+const TZ = "Pacific/Auckland";
+const MIN = 60e3, H = 3600e3, DAY = 24 * H;
+
+// ---- Small helpers -------------------------------------------------------------------------
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const store = {
+  get(k, d) { try { const v = localStorage.getItem("whau." + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem("whau." + k, JSON.stringify(v)); } catch (e) {} },
+  del(k) { try { localStorage.removeItem("whau." + k); } catch (e) {} },
+};
+const settings = {
+  offset: Number(store.get("offset", CFG.tideOffsetMin)) || 0,
+};
+
+const partsFmt = new Intl.DateTimeFormat("en-NZ", { timeZone: TZ, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", weekday: "short" });
+function parts(ms) {
+  const o = {};
+  for (const p of partsFmt.formatToParts(ms)) o[p.type] = p.value;
+  return { y: +o.year, m: +o.month, d: +o.day, h: +o.hour % 24, mi: +o.minute, wd: o.weekday };
+}
+function tzOff(ms) { const p = parts(ms); return Date.UTC(p.y, p.m - 1, p.d, p.h, p.mi) - Math.floor(ms / MIN) * MIN; }
+function nzEpoch(y, m, d, h = 0, mi = 0) {
+  const naive = Date.UTC(y, m - 1, d, h, mi);
+  return naive - tzOff(naive - tzOff(naive));
+}
+function addDays(p, n) { const t = new Date(Date.UTC(p.y, p.m - 1, p.d + n)); return { y: t.getUTCFullYear(), m: t.getUTCMonth() + 1, d: t.getUTCDate() }; }
+const timeFmt = new Intl.DateTimeFormat("en-NZ", { timeZone: TZ, hour: "numeric", minute: "2-digit", hour12: true });
+const dayFmt = new Intl.DateTimeFormat("en-NZ", { timeZone: TZ, weekday: "short", day: "numeric", month: "short" });
+const fmtT = ms => timeFmt.format(ms).replace(/\s/g, "").replace(/\./g, "").toLowerCase();
+function dayLabel(ms) {
+  const a = parts(ms), b = parts(Date.now());
+  const diff = Math.round((Date.UTC(a.y, a.m - 1, a.d) - Date.UTC(b.y, b.m - 1, b.d)) / DAY);
+  return diff === 0 ? "today" : diff === 1 ? "tomorrow" : diff === -1 ? "yesterday" : dayFmt.format(ms);
+}
+const fmtDT = ms => `${fmtT(ms)} ${dayLabel(ms)}`;
+function fmtDur(ms) {
+  const m = Math.round(Math.abs(ms) / MIN);
+  return m < 60 ? `${m} min` : m < 48 * 60 ? `${Math.floor(m / 60)} h ${m % 60 ? (m % 60) + " min" : ""}`.trim() : `${Math.round(m / 1440)} days`;
+}
+const pad2 = n => String(n).padStart(2, "0");
+const toLocalInput = ms => { const p = parts(ms); return `${p.y}-${pad2(p.m)}-${pad2(p.d)}T${pad2(p.h)}:${pad2(p.mi)}`; };
+function fromLocalInput(s) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(s || "");
+  return m ? nzEpoch(+m[1], +m[2], +m[3], +m[4], +m[5]) : null;
+}
+const POINTS = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"];
+const compass = deg => POINTS[Math.round(((deg % 360) + 360) % 360 / 22.5) % 16];
+const worst = (...cls) => cls.includes("bad") ? "bad" : cls.includes("warn") ? "warn" : cls.every(c => c === "na") ? "na" : "good";
+
+// ---- Sun (civil twilight and sunrise), NOAA almanac method ----------------------------------
+function sunEvent(y, m, d, rising, zenith) {
+  const rad = Math.PI / 180, lat = CFG.lat, lngHour = CFG.lon / 15;
+  const N = Math.round((Date.UTC(y, m - 1, d) - Date.UTC(y, 0, 0)) / DAY);
+  const t = N + ((rising ? 6 : 18) - lngHour) / 24;
+  const M = 0.9856 * t - 3.289;
+  let L = (M + 1.916 * Math.sin(M * rad) + 0.020 * Math.sin(2 * M * rad) + 282.634 + 360) % 360;
+  let RA = (Math.atan(0.91764 * Math.tan(L * rad)) / rad + 360) % 360;
+  RA = (RA + Math.floor(L / 90) * 90 - Math.floor(RA / 90) * 90) / 15;
+  const sinDec = 0.39782 * Math.sin(L * rad), cosDec = Math.cos(Math.asin(sinDec));
+  const cosH = (Math.cos(zenith * rad) - sinDec * Math.sin(lat * rad)) / (cosDec * Math.cos(lat * rad));
+  if (cosH > 1 || cosH < -1) return null;
+  const Hh = (rising ? 360 - Math.acos(cosH) / rad : Math.acos(cosH) / rad) / 15;
+  const T = Hh + RA - 0.06571 * t - 6.622;
+  const UT = ((T - lngHour) % 24 + 24) % 24;
+  let res = Date.UTC(y, m - 1, d) + UT * H;
+  const noon = nzEpoch(y, m, d, 12, 0);
+  while (res - noon > 12 * H) res -= DAY;
+  while (noon - res > 12 * H) res += DAY;
+  return res;
+}
+function sunDay(ms) {
+  const p = parts(ms);
+  return {
+    dawn: sunEvent(p.y, p.m, p.d, true, 96), rise: sunEvent(p.y, p.m, p.d, true, 90.833),
+    set: sunEvent(p.y, p.m, p.d, false, 90.833), dusk: sunEvent(p.y, p.m, p.d, false, 96),
+  };
+}
+
+// ---- Tide ---------------------------------------------------------------------------------
+let EV = [];
+function buildEvents() { EV = (DATA.tides || []).map(([t, h, k]) => ({ t: t * 1000 + settings.offset * MIN, h, k })); }
+function seg(ms) {
+  let lo = 0, hi = EV.length - 1;
+  if (!EV.length || ms < EV[0].t || ms >= EV[hi].t) return -1;
+  while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (EV[mid].t <= ms) lo = mid; else hi = mid; }
+  return lo;
+}
+function tideAt(ms) {
+  const i = seg(ms);
+  if (i < 0) return null;
+  const a = EV[i], b = EV[i + 1], T = b.t - a.t, x = (ms - a.t) / T;
+  // LINZ's recommended cosine interpolation between successive high and low waters.
+  const h = a.h + (b.h - a.h) * (1 - Math.cos(Math.PI * x)) / 2;
+  const rate = (b.h - a.h) * Math.PI / 2 * Math.sin(Math.PI * x) / (T / H);
+  return { h, rate, a, b, i, rising: b.h > a.h };
+}
+// Club rule: above the S-bend only within CFG.sBendHours of high water.
+function sBend(ms) {
+  const w = CFG.sBendHours * H, i = seg(ms);
+  if (i < 0) return null;
+  for (let j = Math.max(0, i - 1); j <= Math.min(EV.length - 1, i + 3); j++) {
+    const e = EV[j];
+    if (e.k !== "H") continue;
+    if (Math.abs(ms - e.t) <= w) return { open: true, hw: e, from: e.t - w, until: e.t + w };
+    if (e.t - w > ms) return { open: false, hw: e, from: e.t - w, until: e.t + w };
+  }
+  return null;
+}
+
+// ---- Weather (Open-Meteo) --------------------------------------------------------------------
+let WX = null, wxErr = null;
+async function loadWeather() {
+  const q = new URLSearchParams({
+    latitude: CFG.lat, longitude: CFG.lon, timezone: TZ, timeformat: "unixtime", wind_speed_unit: "kmh",
+    past_days: 3, forecast_days: 16,
+    hourly: "temperature_2m,apparent_temperature,precipitation,precipitation_probability,weather_code,wind_speed_10m,wind_gusts_10m,wind_direction_10m",
+  });
+  try {
+    const r = await fetch("https://api.open-meteo.com/v1/forecast?" + q);
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const j = await r.json();
+    const hr = j.hourly;
+    WX = { t: hr.time.map(s => s * 1000), temp: hr.temperature_2m, app: hr.apparent_temperature, rain: hr.precipitation,
+      pop: hr.precipitation_probability, code: hr.weather_code, ws: hr.wind_speed_10m, wg: hr.wind_gusts_10m, wd: hr.wind_direction_10m,
+      fetched: Date.now() };
+    wxErr = null;
+  } catch (e) { wxErr = e.message || String(e); }
+}
+function wxIdx(ms) {
+  if (!WX) return -1;
+  const i = Math.round((ms - WX.t[0]) / H);
+  return i >= 0 && i < WX.t.length && WX.ws[i] != null ? i : -1;
+}
+// Open-Meteo precipitation at hour t is the total for the hour before t.
+function rainBetween(t0, t1) {
+  if (!WX) return null;
+  let s = 0, n = 0;
+  for (let i = 0; i < WX.t.length; i++) if (WX.t[i] > t0 && WX.t[i] <= t1 && WX.rain[i] != null) { s += WX.rain[i]; n++; }
+  return n ? s : null;
+}
+const WMO = { 0: "Clear", 1: "Mostly clear", 2: "Partly cloudy", 3: "Overcast", 45: "Fog", 48: "Fog", 51: "Light drizzle", 53: "Drizzle", 55: "Heavy drizzle",
+  56: "Freezing drizzle", 57: "Freezing drizzle", 61: "Light rain", 63: "Rain", 65: "Heavy rain", 66: "Freezing rain", 67: "Freezing rain",
+  71: "Light snow", 73: "Snow", 75: "Heavy snow", 77: "Snow grains", 80: "Showers", 81: "Heavy showers", 82: "Violent showers",
+  85: "Snow showers", 86: "Snow showers", 95: "Thunderstorm", 96: "Thunderstorm, hail", 99: "Thunderstorm, hail" };
+function windClass(ws, wg) {
+  if (ws >= CFG.wind.bad || wg >= CFG.gust.bad) return "bad";
+  if (ws >= CFG.wind.warn || wg >= CFG.gust.warn) return "warn";
+  return "good";
+}
+const angDiff = (a, b) => Math.abs(((a - b + 540) % 360) - 180);
+// Wind against tide: the wind blows from the direction the current is running towards.
+function windVsTide(from, ws, tt, ebbTo) {
+  if (!tt) return null;
+  const flowTo = tt.rising ? (ebbTo + 180) % 360 : ebbTo;
+  const d = angDiff(from, flowTo);
+  const slack = Math.abs(tt.rate) < CFG.windTide.minRate, light = ws < CFG.windTide.minWind;
+  return { against: d <= CFG.windTide.arc && !slack && !light, with: d >= 180 - CFG.windTide.arc, d, slack, light,
+    stream: tt.rising ? "flood" : "ebb" };
+}
+function harbourRating(ws, wg, from, tt) {
+  const c = CFG.harbour, e = c.exposure.find(([a, b]) => a < b ? from >= a && from < b : from >= a || from < b) || [0, 0, 1, ""];
+  const eff = ws * e[2];
+  let lvl = eff < c.good && wg < c.gustGood ? 0 : eff < c.warn && wg < c.gustWarn ? 1 : 2;
+  const wt = windVsTide(from, ws, tt, c.ebbTo);
+  if (wt && wt.against) lvl = Math.min(2, lvl + 1);
+  return { cls: ["good", "warn", "bad"][lvl], label: ["Predicted good", "Marginal", "Choppy"][lvl], why: e[3], wt };
+}
+function windRelative(from) {
+  const d = Math.abs(((from - CFG.downstreamBearing + 540) % 360) - 180);
+  if (d <= 45) return "Headwind rowing down to the harbour, tailwind coming back";
+  if (d >= 135) return "Tailwind rowing down to the harbour, headwind coming back";
+  return "Mostly a crosswind on the river";
+}
+const arrow = from => `<svg viewBox="-12 -12 24 24" aria-hidden="true"><path class="arrow" transform="rotate(${(from + 180) % 360})" d="M0 -10 L6 6 L0 2 L-6 6 Z"/></svg>`;
+
+// ---- Flow (LAWA via GitHub Pages; snapshot baked in as a fallback) -------------------------
+let FLOW = DATA.flow || null, flowLive = false, flowErr = null;
+async function loadFlow() {
+  try {
+    const r = await fetch(CFG.flowUrl, { cache: "no-store" });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const j = await r.json();
+    if (j && j.series && j.series.length && (!FLOW || j.latest.t >= FLOW.latest.t)) { FLOW = j; flowLive = true; }
+    flowErr = j && j.error ? j.error : null;
+  } catch (e) { flowErr = e.message || String(e); }
+}
+function flowAt(ms) {
+  if (!FLOW || !FLOW.series) return null;
+  let best = null;
+  for (const [t, v, mx] of FLOW.series) {
+    const d = Math.abs(t * 1000 - ms);
+    if (d <= 30 * MIN && (!best || d < best.d)) best = { d, t: t * 1000, v, mx };
+  }
+  return best;
+}
+function flowClass(v) {
+  const p = FLOW && FLOW.baseline && FLOW.baseline.percentiles;
+  if (!p) return { cls: "na", label: "Unknown" };
+  if (v >= CFG.flowFlood) return { cls: "bad", label: "Flood" };
+  if (v >= p["99"]) return { cls: "bad", label: "High" };
+  if (v >= p["95"]) return { cls: "warn", label: "Elevated" };
+  if (v >= p["75"]) return { cls: "good", label: "A little up" };
+  return { cls: "good", label: "Normal" };
+}
+const fmtFlow = v => v >= 10 ? v.toFixed(0) : v >= 1 ? v.toFixed(1) : v >= 0.1 ? v.toFixed(2) : v.toFixed(3);
+
+// ---- Selection state -----------------------------------------------------------------------
+let selMs = null; // null means "now"
+const sel = () => selMs ?? Date.now();
+function readUrl() {
+  const t = new URLSearchParams(location.search).get("t");
+  const ms = fromLocalInput(t);
+  if (ms != null && Math.abs(ms - Date.now()) > 5 * MIN) selMs = ms;
+}
+function writeUrl() {
+  try {
+    const u = new URL(location.href);
+    if (selMs == null) u.searchParams.delete("t"); else u.searchParams.set("t", toLocalInput(selMs));
+    history.replaceState(null, "", u);
+  } catch (e) {}
+}
+function quickOptions() {
+  const now = Date.now(), p = parts(now), tm = addDays(p, 1);
+  const opts = [["Now", null], ["Tomorrow 6am", nzEpoch(tm.y, tm.m, tm.d, 6)], ["Tomorrow 5pm", nzEpoch(tm.y, tm.m, tm.d, 17)]];
+  const wdIdx = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(p.wd.slice(0, 3));
+  for (const [name, target] of [["Sat", 6], ["Sun", 0]]) {
+    let add = (target - wdIdx + 7) % 7;
+    let d = addDays(p, add), ms = nzEpoch(d.y, d.m, d.d, 7);
+    if (ms < now) { d = addDays(p, add + 7); ms = nzEpoch(d.y, d.m, d.d, 7); }
+    opts.push([`${name} 7am`, ms]);
+  }
+  if (p.h < 17) opts.splice(1, 0, ["This evening 5pm", nzEpoch(p.y, p.m, p.d, 17)]);
+  return opts;
+}
+function renderQuick() {
+  $("quick").innerHTML = quickOptions().map(([l, ms]) =>
+    `<button type="button" data-ms="${ms ?? ""}" aria-pressed="${(ms == null && selMs == null) || (ms != null && selMs === ms)}">${esc(l)}</button>`).join("");
+  $("quick").querySelectorAll("button").forEach(b => b.onclick = () => { selMs = b.dataset.ms ? +b.dataset.ms : null; update(); });
+}
+
+// ---- Charts ---------------------------------------------------------------------------------
+function nightBands(x0, x1, sx, top, h) {
+  let out = "";
+  for (let t = x0 - DAY; t < x1 + DAY; t += DAY) {
+    const s = sunDay(t), next = sunDay(t + DAY);
+    if (s.dusk == null || next.dawn == null) continue;
+    const a = Math.max(x0, s.dusk), b = Math.min(x1, next.dawn);
+    if (b > a) out += `<rect x="${sx(a)}" y="${top}" width="${sx(b) - sx(a)}" height="${h}" fill="var(--night)"/>`;
+  }
+  return out;
+}
+function hourTicks(x0, x1, every) {
+  const ticks = [];
+  for (let t = Math.ceil(x0 / H) * H; t <= x1; t += H) if (parts(t).h % every === 0) ticks.push(t);
+  return ticks;
+}
+const chartW = id => Math.max(320, Math.min(680, Math.round(($(id) && $(id).clientWidth) || 680)));
+function tideChart(ms) {
+  const W = chartW("tideChart"), narrow = W < 520;
+  const Hh = 220, L = 34, R = 10, T = 18, B = 26;
+  const x0 = ms - 6 * H, x1 = ms + 18 * H;
+  const sx = t => L + (t - x0) / (x1 - x0) * (W - L - R);
+  const yMax = 4, sy = h => T + (1 - h / yMax) * (Hh - T - B);
+  let pts = [];
+  for (let t = x0; t <= x1; t += 10 * MIN) { const v = tideAt(t); if (v) pts.push([sx(t), sy(v.h)]); }
+  if (pts.length < 2) return "";
+  const line = "M" + pts.map(p => p[0].toFixed(1) + "," + p[1].toFixed(1)).join("L");
+  const area = line + `L${pts[pts.length - 1][0].toFixed(1)},${sy(0)}L${pts[0][0].toFixed(1)},${sy(0)}Z`;
+  let g = nightBands(x0, x1, sx, T, Hh - T - B);
+  for (let h = 0; h <= yMax; h++) g += `<line class="grid" x1="${L}" x2="${W - R}" y1="${sy(h)}" y2="${sy(h)}"/><text x="${L - 6}" y="${sy(h) + 4}" text-anchor="end">${h} m</text>`;
+  for (const t of hourTicks(x0, x1, narrow ? 6 : 3)) {
+    const p = parts(t), lab = p.h === 0 ? dayFmt.format(t) : fmtT(t).replace(":00", "");
+    g += `<text x="${sx(t)}" y="${Hh - 8}" text-anchor="middle">${esc(lab)}</text>`;
+  }
+  for (const e of EV) {
+    if (e.k !== "H") continue;
+    const a = Math.max(x0, e.t - CFG.sBendHours * H), b = Math.min(x1, e.t + CFG.sBendHours * H);
+    if (b <= a) continue;
+    g += `<rect x="${sx(a)}" y="${T}" width="${sx(b) - sx(a)}" height="${Hh - T - B}" fill="var(--good-soft)" opacity=".8"/>`;
+    const cx = (sx(a) + sx(b)) / 2;
+    if (sx(b) - sx(a) >= 80) g += `<text x="${cx}" y="${Hh - B - 20}" text-anchor="middle" style="fill:var(--good);font-weight:600"><tspan x="${cx}">Above S-bend</tspan><tspan x="${cx}" dy="13">accessible</tspan></text>`;
+  }
+  g += `<path d="${area}" fill="var(--band)"/><path d="${line}" fill="none" stroke="var(--accent)" stroke-width="2.5"/>`;
+  for (const e of EV) {
+    if (e.t < x0 || e.t > x1) continue;
+    const y = sy(e.h), up = e.k === "H";
+    g += `<circle cx="${sx(e.t)}" cy="${y}" r="3" fill="var(--accent)"/><text class="lbl" x="${sx(e.t)}" y="${up ? y - 8 : y + 16}" text-anchor="middle">${up ? "H" : "L"} ${esc(fmtT(e.t))} · ${e.h.toFixed(1)}</text>`;
+  }
+  const v = tideAt(ms);
+  if (v) g += `<line class="now" x1="${sx(ms)}" x2="${sx(ms)}" y1="${T - 6}" y2="${Hh - B}"/><circle cx="${sx(ms)}" cy="${sy(v.h)}" r="5.5" fill="var(--buoy)" stroke="var(--surface)" stroke-width="2"/>`;
+  return `<svg viewBox="0 0 ${W} ${Hh}" role="img" aria-label="Tide height from 6 hours before to 18 hours after the chosen time">${g}</svg>`;
+}
+const wdFmt = new Intl.DateTimeFormat("en-NZ", { timeZone: TZ, weekday: "short" });
+function flowChart(ms) {
+  if (!FLOW || !FLOW.series || FLOW.series.length < 2) return "";
+  const S = FLOW.series, base = FLOW.baseline && FLOW.baseline.percentiles;
+  const W = chartW("flowChart"), narrow = W < 520;
+  const Hh = 180, L = 44, R = 10, T = 12, B = 26;
+  const x0 = S[0][0] * 1000, x1 = Math.max(S[S.length - 1][0] * 1000, Math.min(ms, Date.now()));
+  const vmax = Math.max(...S.map(s => s[2])), lo = 0.01, hi = Math.max(10, vmax * 1.2);
+  const sx = t => L + (t - x0) / (x1 - x0) * (W - L - R);
+  const sy = v => T + (1 - (Math.log10(Math.max(v, lo)) - Math.log10(lo)) / (Math.log10(hi) - Math.log10(lo))) * (Hh - T - B);
+  let g = nightBands(x0, x1, sx, T, Hh - T - B);
+  for (const v of [0.01, 0.1, 1, 10]) if (v <= hi) g += `<line class="grid" x1="${L}" x2="${W - R}" y1="${sy(v)}" y2="${sy(v)}"/><text x="${L - 6}" y="${sy(v) + 4}" text-anchor="end">${v}</text>`;
+  for (let t = Math.ceil(x0 / H) * H; t <= x1; t += H) { const p = parts(t); if (p.h === 0) g += `<text x="${sx(t)}" y="${Hh - 8}" text-anchor="middle">${esc((narrow ? wdFmt : dayFmt).format(t))}</text>`; }
+  if (base) {
+    g += `<line class="thr" x1="${L}" x2="${W - R}" y1="${sy(base["50"])}" y2="${sy(base["50"])}"/><text x="${W - R}" y="${sy(base["50"]) - 4}" text-anchor="end">typical (median)</text>`;
+    g += `<line class="thr" x1="${L}" x2="${W - R}" y1="${sy(base["99"])}" y2="${sy(base["99"])}"/><text x="${W - R}" y="${sy(base["99"]) - 4}" text-anchor="end">top 1% of the year</text>`;
+  }
+  const line = "M" + S.map(s => sx(s[0] * 1000).toFixed(1) + "," + sy(s[2]).toFixed(1)).join("L");
+  g += `<path d="${line}" fill="none" stroke="var(--accent)" stroke-width="2"/>`;
+  g += `<text x="${L + 2}" y="${T + 2}" dy="0.7em">m³/s (log scale)</text>`;
+  if (ms >= x0 && ms <= x1) g += `<line class="now" x1="${sx(ms)}" x2="${sx(ms)}" y1="${T}" y2="${Hh - B}"/>`;
+  return `<svg viewBox="0 0 ${W} ${Hh}" role="img" aria-label="Whau Stream flow over the last 7 days">${g}</svg>`;
+}
+
+// ---- Render ---------------------------------------------------------------------------------
+const stat = (k, v, s = "", cls = "") => `<div class="stat ${cls}"><span class="k">${k}</span><span class="v">${v}</span>${s ? `<span class="s">${s}</span>` : ""}</div>`;
+const chip = (k, v, s, cls) => `<div class="chip ${cls}"><span class="k">${k}</span><span class="v">${v}</span><span class="s">${s}</span></div>`;
+
+function update() {
+  const ms = sel(), isNow = selMs == null, nowMs = Date.now();
+  writeUrl();
+  renderQuick();
+  $("pick").value = toLocalInput(ms);
+  $("selLabel").textContent = isNow ? `Now · ${fmtT(ms)}` : `${dayLabel(ms).replace(/^./, c => c.toUpperCase())} · ${fmtT(ms)}`;
+  const chips = [], said = [];
+
+  // Tide
+  const tt = tideAt(ms);
+  if (!tt) {
+    $("tideStats").innerHTML = `<div class="msg">No tide predictions for this date. Add the next year's LINZ table.</div>`;
+    $("tideChart").innerHTML = ""; $("tideNote").textContent = "";
+    chips.push(chip("Tide", "—", "No prediction", "na"));
+  } else {
+    const dir = tt.rising ? "Flooding" : "Ebbing";
+    const next = tt.b, after = EV[tt.i + 2];
+    const sb = sBend(ms);
+    $("tideStats").innerHTML =
+      stat("Height", `${tt.h.toFixed(1)} m`, `${dir}, ${tt.rate >= 0 ? "+" : "−"}${Math.abs(tt.rate).toFixed(2)} m/h`) +
+      stat(`Next ${next.k === "H" ? "high" : "low"}`, fmtT(next.t), `${next.h.toFixed(1)} m · in ${fmtDur(next.t - ms)}`) +
+      (after ? stat(`Then ${after.k === "H" ? "high" : "low"}`, fmtT(after.t), `${after.h.toFixed(1)} m · ${dayLabel(after.t)}`) : "") +
+      (sb ? stat("Above the S-bend", `${fmtT(sb.from)}–${fmtT(sb.until)}`, `${sb.open ? "open now" : `opens in ${fmtDur(sb.from - ms)}`} · high water ${fmtT(sb.hw.t)} ± ${CFG.sBendHours} h${dayLabel(sb.hw.t) === dayLabel(ms) ? "" : ` (${dayLabel(sb.hw.t)})`}`, "") : "");
+    $("tideChart").innerHTML = tideChart(ms);
+    $("sbLegend").textContent = `Above S-bend accessible: within ${CFG.sBendHours} h of high water (club rule)`;
+    $("tideNote").textContent = `Auckland tides${settings.offset ? ` ${settings.offset > 0 ? "+" : "−"}${Math.abs(settings.offset)} min` : ""} · heights above chart datum`;
+    const sbTxt = !sb ? "" : sb.open ? `Above the S-bend until ${fmtT(sb.until)}`
+      : `Stay below the S-bend · OK above from ${fmtT(sb.from)}${dayLabel(sb.from) === dayLabel(ms) ? "" : ` ${dayLabel(sb.from)}`}`;
+    const cls = sb ? (sb.open ? "good" : "warn") : "na";
+    chips.push(chip("Tide", `${tt.h.toFixed(1)} m ${tt.rising ? "↑" : "↓"}`, `${dir}; ${next.k === "H" ? "high" : "low"} at ${fmtT(next.t)}${sbTxt ? `<br><b>${sbTxt}</b>` : ""}`, cls));
+    said.push(`<b>${dir}</b>, ${next.k === "H" ? "high" : "low"} at ${fmtT(next.t)} (${next.h.toFixed(1)} m)${sb ? (sb.open ? `, <b>above the S-bend OK</b> until ${fmtT(sb.until)}` : `, <b>stay below the S-bend</b> until ${fmtT(sb.from)}`) : ""}`);
+  }
+
+  // Stream
+  const latest = FLOW && FLOW.latest ? { t: FLOW.latest.t * 1000, v: FLOW.latest.v } : null;
+  const past = flowAt(ms);
+  const future = latest && ms > Math.max(latest.t, nowMs) + 45 * MIN;
+  if (!latest) {
+    $("flowStats").innerHTML = ""; $("flowChart").innerHTML = "";
+    $("flowText").innerHTML = `<span class="msg">Flow data unavailable${flowErr ? ` (${esc(flowErr)})` : ""}. Rain below is the best guide.</span>`;
+    $("flowAge").textContent = "";
+  } else {
+    const ref = !future && past ? past : latest;
+    const fc = flowClass(ref.v);
+    const med = FLOW.baseline ? FLOW.baseline.percentiles["50"] : null;
+    const hr1 = flowAt(ref.t - H);
+    let trend = "";
+    if (hr1) trend = ref.v > hr1.v * 1.1 ? "rising" : ref.v < hr1.v * 0.9 ? "falling" : "steady";
+    let peak = FLOW.series.reduce((a, s) => s[2] > a[1] ? [s[0] * 1000, s[2]] : a, [0, 0]);
+    const age = nowMs - latest.t;
+    $("flowAge").textContent = `Gauge reading ${fmtDur(age)} ago${flowLive ? "" : " (cached copy)"}${age > 3 * H ? " · stale" : ""}`;
+    // The Whau is a small urban catchment: it rises within hours of heavy rain and drops back
+    // within about a day, so rain in the 24-48 h before the chosen time is what matters.
+    const r24 = rainBetween(ms - 24 * H, ms), r48 = rainBetween(ms - 48 * H, ms);
+    $("flowStats").innerHTML =
+      stat(future ? "Flow now" : "Flow", `${fmtFlow(ref.v)} m³/s`, `<span class="tag ${fc.cls}">${fc.label}</span> ${med ? `${(ref.v / med).toFixed(ref.v / med < 10 ? 1 : 0)}× typical` : ""}${trend ? `, ${trend}` : ""}`) +
+      stat("7-day peak", `${fmtFlow(peak[1])} m³/s`, peak[0] ? fmtDT(peak[0]) : "") +
+      stat(`Rain, 24 h before${future ? " (forecast)" : ""}`, r24 == null ? "—" : `${r24.toFixed(0)} mm`, r48 == null ? "" : `${r48.toFixed(0)} mm over 48 h`);
+    let txt = "", outlook = null;
+    if (future) {
+      const a24 = r24 ?? 0, a48 = r48 ?? 0, soon = ms - latest.t < 24 * H;
+      outlook = a24 >= 25 || a48 >= 40 ? { cls: "bad", label: "Likely high", txt: "Heavy rain is forecast in the day or two before then. Expect the stream to be high, with debris, especially on the ebb." }
+        : a24 >= 10 || a48 >= 20 ? { cls: "warn", label: "Likely up", txt: "Decent rain is forecast in the day or two before then, so the stream will probably be up." }
+        : soon && fc.cls !== "good" ? { cls: "warn", label: "Easing", txt: "Little rain forecast. The stream is up now but the Whau drops back within a day or so, so it should be easing." }
+        : { cls: "good", label: "Likely normal", txt: "Little rain forecast in the day or two before then, so the stream should be at normal levels." };
+      txt = `<b>Outlook:</b> ${outlook.txt} This is a guide from the rain forecast, not a flow prediction.`;
+    } else if (fc.cls !== "good") {
+      txt = "Fresh water is coming down. Expect a stronger ebb and less flood tide in the upper river, plus floating debris.";
+    }
+    $("flowText").innerHTML = txt;
+    $("flowChart").innerHTML = flowChart(ms);
+    if (outlook) {
+      chips.push(chip("Stream", outlook.label, `${r24 == null ? "" : `${r24.toFixed(0)} mm rain in the 24 h before · `}${fmtFlow(latest.v)} m³/s now`, outlook.cls));
+      said.push(`stream <b>${outlook.label.toLowerCase()}</b>${r24 == null ? "" : ` (${r24.toFixed(0)} mm rain in the 24 h before)`}`);
+    } else {
+      chips.push(chip("Stream", fc.label, `${fmtFlow(ref.v)} m³/s${med ? ` · ${(ref.v / med).toFixed(ref.v / med < 10 ? 1 : 0)}× typical` : ""}${trend ? `, ${trend}` : ""}`, fc.cls));
+      said.push(`stream <b>${fc.label.toLowerCase()}</b>${trend ? `, ${trend}` : ""}`);
+    }
+  }
+
+  // Weather
+  const i = wxIdx(ms);
+  if (i < 0) {
+    $("wxStats").innerHTML = `<div class="msg">${wxErr ? `Forecast unavailable (${esc(wxErr)}).` : WX ? "No forecast this far ahead (16 days max)." : "Loading forecast…"}</div>`;
+    $("wxStrip").innerHTML = ""; $("wxNote").textContent = "";
+    chips.push(chip("Wind", "—", WX || wxErr ? "No forecast" : "Loading…", "na"));
+    chips.push(chip("Harbour", "—", WX || wxErr ? "No forecast" : "Loading…", "na"));
+  } else {
+    const ws = WX.ws[i], wg = WX.wg[i], wd = WX.wd[i], wc = windClass(ws, wg);
+    $("wxStats").innerHTML =
+      stat("Wind", `${compass(wd)} ${Math.round(ws)} km/h`, `gusts ${Math.round(wg)} km/h`, "") +
+      stat("On the river", "", windRelative(wd)) +
+      stat("Weather", esc(WMO[WX.code[i]] || "—"), `${Math.round(WX.temp[i])}°C, feels ${Math.round(WX.app[i])}°C`) +
+      stat("Rain", `${(WX.rain[i] || 0).toFixed(1)} mm`, WX.pop[i] != null && WX.t[i] > nowMs ? `${WX.pop[i]}% chance that hour` : "in the hour");
+    let strip = "";
+    for (let k = i - 2; k <= i + 7; k++) {
+      if (k < 0 || k >= WX.t.length || WX.ws[k] == null) continue;
+      const c = windClass(WX.ws[k], WX.wg[k]);
+      strip += `<div class="hr ${k === i ? "on" : ""} ${c === "good" ? "" : c}" title="${esc(compass(WX.wd[k]))} ${Math.round(WX.ws[k])} km/h, gusts ${Math.round(WX.wg[k])} km/h">
+        <span class="t">${esc(fmtT(WX.t[k]).replace(":00", ""))}</span>${arrow(WX.wd[k])}<span class="w">${Math.round(WX.ws[k])}</span>
+        <span class="g">g${Math.round(WX.wg[k])}</span><span class="r">${(WX.rain[k] || 0).toFixed(1)}mm</span><span class="c">${Math.round(WX.temp[k])}°</span></div>`;
+    }
+    $("wxStrip").innerHTML = strip;
+    $("wxNote").textContent = `km/h · arrows show where the wind blows to · updated ${fmtT(WX.fetched)}`;
+    chips.push(chip("Wind", `${compass(wd)} ${Math.round(ws)}–${Math.round(wg)} km/h`, windRelative(wd).split(",")[0], wc));
+    said.push(`<b>${compass(wd)} ${Math.round(ws)} km/h</b> gusting ${Math.round(wg)}`);
+
+    // Whau: wind against tide
+    const wt = windVsTide(wd, ws, tt, CFG.downstreamBearing);
+    if (wt) {
+      const v = wt.against ? "Against" : wt.slack ? "Slack" : wt.light ? "Light wind" : wt.with ? "With" : "Across";
+      const sub = wt.against ? `${compass(wd)} wind against the ${wt.stream}: expect chop`
+        : wt.slack ? "Little tidal current right now"
+        : wt.light ? "Too light to matter"
+        : wt.with ? `Wind running with the ${wt.stream}`
+        : `Wind across the ${wt.stream}`;
+      chips.push(chip("Wind v tide (Whau)", v, sub, wt.against ? (ws >= CFG.wind.warn ? "bad" : "warn") : "good"));
+      if (wt.against) said.push(`<b>wind against tide</b> on the Whau`);
+    }
+
+    // Harbour
+    const hb = harbourRating(ws, wg, wd, tt);
+    chips.push(chip("Harbour", hb.label, `${compass(wd)} ${Math.round(ws)}, gusts ${Math.round(wg)} km/h · ${hb.why}${hb.wt && hb.wt.against ? ` · against the ${hb.wt.stream}` : ""}`, hb.cls));
+    said.push(`harbour <b>${hb.label.toLowerCase()}</b>`);
+  }
+
+  // Light
+  const sun = sunDay(ms);
+  if (sun.dawn && sun.dusk) {
+    const light = ms >= sun.dawn && ms <= sun.dusk, day = ms >= sun.rise && ms <= sun.set;
+    chips.push(chip("Light", day ? "Daylight" : light ? "Twilight" : "Dark",
+      `First light ${fmtT(sun.dawn)} · sunrise ${fmtT(sun.rise)} · sunset ${fmtT(sun.set)} · last light ${fmtT(sun.dusk)}`, day ? "good" : light ? "warn" : "bad"));
+    if (!light) said.push("<b>dark</b>, so you'll need lights");
+  }
+
+  const ORDER = ["Tide", "Stream", "Wind v tide (Whau)", "Wind", "Harbour", "Light"];
+  const key = c => ORDER.indexOf((/<span class="k">(.*?)<\/span>/.exec(c) || [])[1]);
+  $("verdict").innerHTML = chips.sort((a, b) => key(a) - key(b)).join("");
+  $("summary").innerHTML = said.length ? said.join(" · ") + "." : "";
+}
+
+// ---- Settings ---------------------------------------------------------------------------------
+function initSettings() {
+  const o = $("setOffset");
+  o.value = settings.offset;
+  o.oninput = () => { const v = parseFloat(o.value); if (isFinite(v)) { settings.offset = v; store.set("offset", v); buildEvents(); update(); } };
+  $("setReset").onclick = () => {
+    store.del("offset");
+    settings.offset = CFG.tideOffsetMin;
+    o.value = settings.offset; buildEvents(); update();
+  };
+}
+
+// ---- Boot -------------------------------------------------------------------------------------
+(function boot() {
+  buildEvents();
+  readUrl();
+  const pick = $("pick");
+  pick.min = toLocalInput(Date.now() - 2 * DAY);
+  pick.max = toLocalInput(Date.now() + 15 * DAY);
+  pick.onchange = () => { const v = fromLocalInput(pick.value); if (v != null) { selMs = v; update(); } };
+  $("share").onclick = async () => {
+    const u = new URL(location.href);
+    u.searchParams.set("t", toLocalInput(sel()));
+    try { await navigator.clipboard.writeText(u.toString()); $("share").textContent = "Copied"; }
+    catch (e) { $("share").textContent = "Copy failed"; }
+    setTimeout(() => $("share").textContent = "Copy link", 1500);
+  };
+  initSettings();
+  update();
+  Promise.allSettled([loadWeather().then(update), loadFlow().then(update)]);
+  let rz; addEventListener("resize", () => { clearTimeout(rz); rz = setTimeout(update, 150); });
+  // Keep "now" current and data fresh while the page is open.
+  setInterval(() => { if (selMs == null) update(); }, MIN);
+  setInterval(() => { loadWeather().then(update); loadFlow().then(update); }, 15 * MIN);
+})();
+</script>
