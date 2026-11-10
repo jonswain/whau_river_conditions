@@ -1,11 +1,11 @@
-"""Inject tide events and a flow snapshot into src/template.html.
+"""Inject tide events into src/template.html.
 
     python scripts/build.py                   -> build/index.html (local preview)
     python scripts/build.py --standalone OUT  -> OUT, a blog-ready page, e.g.
         ../jonswain.github.io/visualisations/whau-conditions/index.html
 
-The flow snapshot is only a fallback: the page fetches the live flow.json from GitHub Pages
-and uses whichever is newer. Tides are fixed predictions, so baking them in is the real data.
+Tides are fixed predictions, so they're baked in. Weather and rain come from Open-Meteo in the
+browser.
 """
 import argparse
 import json
@@ -25,11 +25,7 @@ IMAGE = f"/images/visualisations/{SLUG}.png"
 def build():
     html = (ROOT / "src" / "template.html").read_text()
     assert "/*DATA*/null" in html
-    flow_path = ROOT / "docs" / "flow.json"
-    data = {
-        "tides": json.loads((ROOT / "data" / "tides.json").read_text()),
-        "flow": json.loads(flow_path.read_text()) if flow_path.exists() else None,
-    }
+    data = {"tides": json.loads((ROOT / "data" / "tides.json").read_text())}
     blob = json.dumps(data, separators=(",", ":")).replace("</", "<\\/")
     return html.replace("/*DATA*/null", blob)
 

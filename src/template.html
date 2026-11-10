@@ -144,10 +144,11 @@ footer a { color: var(--ink-2); }
   </section>
 
   <section class="panel" id="stream">
-    <div class="ph"><h2>Whau Stream</h2><span class="note" id="flowAge"></span></div>
-    <div class="stats" id="flowStats"></div>
-    <p id="flowText"></p>
-    <div class="chart" id="flowChart"></div>
+    <div class="ph"><h2>Whau Stream &amp; rain</h2><span class="note" id="rainNote"></span></div>
+    <div class="stats" id="rainStats"></div>
+    <p id="rainText"></p>
+    <div class="chart" id="rainChart"></div>
+    <p class="note">The Whau is a small, fast urban stream. Over a year of Auckland Council gauge data, rain in the previous 6 hours was the best guide to its flow: it rises within hours of heavy rain and is usually back to normal about 6 hours after the rain stops.</p>
   </section>
 
   <section class="panel" id="weather">
@@ -169,7 +170,7 @@ footer a { color: var(--ink-2); }
   </details>
 
   <footer>
-    <p><b>Sources.</b> Tides: <a href="https://www.linz.govt.nz/products-services/tides-and-tidal-streams/tide-predictions">LINZ</a> predictions for the Auckland standard port (Waitematā), not a Whau gauge, so times are shifted by the offset above. Stream: Auckland Council's Whau flow gauge via <a id="flowSrc" href="https://www.lawa.org.nz/explore-data/auckland-region/water-quantity/monitoring-sites/whau-flow">LAWA</a> (provisional data, refreshed about every 30 min). Weather: <a href="https://open-meteo.com/">Open-Meteo</a> forecast model. Dawn and dusk are civil twilight, calculated here.</p>
+    <p><b>Sources.</b> Tides: <a href="https://www.linz.govt.nz/products-services/tides-and-tidal-streams/tide-predictions">LINZ</a> predictions for the Auckland standard port (Waitematā), not a Whau gauge, so times are shifted by the offset above. Rain: <a href="https://open-meteo.com/">Open-Meteo</a> model rainfall for the club (past and forecast). Weather: <a href="https://open-meteo.com/">Open-Meteo</a> forecast model. Dawn and dusk are civil twilight, calculated here.</p>
     <p>A planning aid, not a safety call. Check the river yourself and follow the club's safety rules.</p>
   </footer>
 </div>
@@ -199,8 +200,9 @@ const CFG = {
   downstreamBearing: 20,                        // heading from the club towards the harbour, degrees true
   wind: { warn: 22, bad: 33 },                  // sustained km/h
   gust: { warn: 37, bad: 46 },                  // gust km/h
-  flowFlood: 5,                                 // m3/s: call it a flood above this
-  flowUrl: "https://jonswain.github.io/whau_river_conditions/flow.json",
+  // Stream from rain in the 6 h before. Calibrated against a year of the Whau gauge
+  // (Blockhouse Bay Rd): >= 6 mm meant flow in its top 5% ~70% of the time, >= 15 mm its top 1% ~40%.
+  stream: { up: 6, high: 15 },
 };
 const TZ = "Pacific/Auckland";
 const MIN = 60e3, H = 3600e3, DAY = 24 * H;
@@ -317,7 +319,7 @@ let WX = null, wxErr = null;
 async function loadWeather() {
   const q = new URLSearchParams({
     latitude: CFG.lat, longitude: CFG.lon, timezone: TZ, timeformat: "unixtime", wind_speed_unit: "kmh",
-    past_days: 3, forecast_days: 16,
+    past_days: 8, forecast_days: 16,
     hourly: "temperature_2m,apparent_temperature,precipitation,precipitation_probability,weather_code,wind_speed_10m,wind_gusts_10m,wind_direction_10m",
   });
   try {
@@ -378,36 +380,18 @@ function windRelative(from) {
 }
 const arrow = from => `<svg viewBox="-12 -12 24 24" aria-hidden="true"><path class="arrow" transform="rotate(${(from + 180) % 360})" d="M0 -10 L6 6 L0 2 L-6 6 Z"/></svg>`;
 
-// ---- Flow (LAWA via GitHub Pages; snapshot baked in as a fallback) -------------------------
-let FLOW = DATA.flow || null, flowLive = false, flowErr = null;
-async function loadFlow() {
-  try {
-    const r = await fetch(CFG.flowUrl, { cache: "no-store" });
-    if (!r.ok) throw new Error("HTTP " + r.status);
-    const j = await r.json();
-    if (j && j.series && j.series.length && (!FLOW || j.latest.t >= FLOW.latest.t)) { FLOW = j; flowLive = true; }
-    flowErr = j && j.error ? j.error : null;
-  } catch (e) { flowErr = e.message || String(e); }
-}
-function flowAt(ms) {
-  if (!FLOW || !FLOW.series) return null;
-  let best = null;
-  for (const [t, v, mx] of FLOW.series) {
-    const d = Math.abs(t * 1000 - ms);
-    if (d <= 30 * MIN && (!best || d < best.d)) best = { d, t: t * 1000, v, mx };
-  }
-  return best;
-}
-function flowClass(v) {
-  const p = FLOW && FLOW.baseline && FLOW.baseline.percentiles;
-  if (!p) return { cls: "na", label: "Unknown" };
-  if (v >= CFG.flowFlood) return { cls: "bad", label: "Flood" };
-  if (v >= p["99"]) return { cls: "bad", label: "High" };
-  if (v >= p["95"]) return { cls: "warn", label: "Elevated" };
-  if (v >= p["75"]) return { cls: "good", label: "A little up" };
+// ---- Stream (from rain) -------------------------------------------------------------------
+function streamFromRain(r6) {
+  if (r6 == null) return { cls: "na", label: "Unknown" };
+  if (r6 >= CFG.stream.high) return { cls: "bad", label: "High" };
+  if (r6 >= CFG.stream.up) return { cls: "warn", label: "Up" };
   return { cls: "good", label: "Normal" };
 }
-const fmtFlow = v => v >= 10 ? v.toFixed(0) : v >= 1 ? v.toFixed(1) : v >= 0.1 ? v.toFixed(2) : v.toFixed(3);
+function lastRain(ms, min = 0.5) {
+  if (!WX) return null;
+  for (let k = WX.t.length - 1; k >= 0; k--) if (WX.t[k] <= ms + 30 * MIN && (WX.rain[k] || 0) >= min) return WX.t[k];
+  return null;
+}
 
 // ---- Selection state -----------------------------------------------------------------------
 let selMs = null; // null means "now"
@@ -496,27 +480,30 @@ function tideChart(ms) {
   return `<svg viewBox="0 0 ${W} ${Hh}" role="img" aria-label="Tide height from 6 hours before to 18 hours after the chosen time">${g}</svg>`;
 }
 const wdFmt = new Intl.DateTimeFormat("en-NZ", { timeZone: TZ, weekday: "short" });
-function flowChart(ms) {
-  if (!FLOW || !FLOW.series || FLOW.series.length < 2) return "";
-  const S = FLOW.series, base = FLOW.baseline && FLOW.baseline.percentiles;
-  const W = chartW("flowChart"), narrow = W < 520;
-  const Hh = 180, L = 44, R = 10, T = 12, B = 26;
-  const x0 = S[0][0] * 1000, x1 = Math.max(S[S.length - 1][0] * 1000, Math.min(ms, Date.now()));
-  const vmax = Math.max(...S.map(s => s[2])), lo = 0.01, hi = Math.max(10, vmax * 1.2);
+function rainChart(ms) {
+  if (!WX) return "";
+  const W = chartW("rainChart"), narrow = W < 520;
+  const Hh = 170, L = 40, R = 10, T = 14, B = 26, now = Date.now();
+  const x0 = Math.max(WX.t[0] - H, ms - 4 * DAY), x1 = Math.min(WX.t[WX.t.length - 1], ms + DAY);
+  if (x1 <= x0) return "";
   const sx = t => L + (t - x0) / (x1 - x0) * (W - L - R);
-  const sy = v => T + (1 - (Math.log10(Math.max(v, lo)) - Math.log10(lo)) / (Math.log10(hi) - Math.log10(lo))) * (Hh - T - B);
+  const bars = [];
+  for (let k = 0; k < WX.t.length; k++) if (WX.t[k] > x0 && WX.t[k] <= x1 && WX.rain[k] != null) bars.push([WX.t[k], WX.rain[k]]);
+  const vmax = Math.max(4, ...bars.map(b => b[1])) * 1.1;
+  const sy = v => T + (1 - v / vmax) * (Hh - T - B);
   let g = nightBands(x0, x1, sx, T, Hh - T - B);
-  for (const v of [0.01, 0.1, 1, 10]) if (v <= hi) g += `<line class="grid" x1="${L}" x2="${W - R}" y1="${sy(v)}" y2="${sy(v)}"/><text x="${L - 6}" y="${sy(v) + 4}" text-anchor="end">${v}</text>`;
+  // the 6 h that decide the stream call
+  const a = Math.max(x0, ms - 6 * H), b = Math.min(x1, ms);
+  if (b > a) g += `<rect x="${sx(a)}" y="${T}" width="${sx(b) - sx(a)}" height="${Hh - T - B}" fill="var(--band)"/>`;
+  const step = vmax > 20 ? 10 : vmax > 8 ? 4 : 2;
+  for (let v = 0; v <= vmax; v += step) g += `<line class="grid" x1="${L}" x2="${W - R}" y1="${sy(v)}" y2="${sy(v)}"/><text x="${L - 6}" y="${sy(v) + 4}" text-anchor="end">${v}</text>`;
   for (let t = Math.ceil(x0 / H) * H; t <= x1; t += H) { const p = parts(t); if (p.h === 0) g += `<text x="${sx(t)}" y="${Hh - 8}" text-anchor="middle">${esc((narrow ? wdFmt : dayFmt).format(t))}</text>`; }
-  if (base) {
-    g += `<line class="thr" x1="${L}" x2="${W - R}" y1="${sy(base["50"])}" y2="${sy(base["50"])}"/><text x="${W - R}" y="${sy(base["50"]) - 4}" text-anchor="end">typical (median)</text>`;
-    g += `<line class="thr" x1="${L}" x2="${W - R}" y1="${sy(base["99"])}" y2="${sy(base["99"])}"/><text x="${W - R}" y="${sy(base["99"]) - 4}" text-anchor="end">top 1% of the year</text>`;
-  }
-  const line = "M" + S.map(s => sx(s[0] * 1000).toFixed(1) + "," + sy(s[2]).toFixed(1)).join("L");
-  g += `<path d="${line}" fill="none" stroke="var(--accent)" stroke-width="2"/>`;
-  g += `<text x="${L + 2}" y="${T + 2}" dy="0.7em">m³/s (log scale)</text>`;
+  const bw = Math.max(1, (W - L - R) / ((x1 - x0) / H) - 0.6);
+  for (const [t, v] of bars) if (v > 0) g += `<rect x="${(sx(t) - bw).toFixed(1)}" y="${sy(v).toFixed(1)}" width="${bw.toFixed(1)}" height="${(sy(0) - sy(v)).toFixed(1)}" fill="var(--accent)" opacity="${t > now ? 0.4 : 1}"/>`;
+  g += `<text x="${L + 2}" y="${T + 2}" dy="0.7em">mm per hour</text>`;
+  if (now > x0 && now < x1) g += `<line x1="${sx(now)}" x2="${sx(now)}" y1="${T}" y2="${Hh - B}" stroke="var(--muted)" stroke-dasharray="3 3"/><text x="${sx(now) + 4}" y="${T + 2}" dy="0.7em">forecast →</text>`;
   if (ms >= x0 && ms <= x1) g += `<line class="now" x1="${sx(ms)}" x2="${sx(ms)}" y1="${T}" y2="${Hh - B}"/>`;
-  return `<svg viewBox="0 0 ${W} ${Hh}" role="img" aria-label="Whau Stream flow over the last 7 days">${g}</svg>`;
+  return `<svg viewBox="0 0 ${W} ${Hh}" role="img" aria-label="Hourly rain around the chosen time; the shaded 6 hours set the stream call">${g}</svg>`;
 }
 
 // ---- Render ---------------------------------------------------------------------------------
@@ -556,51 +543,29 @@ function update() {
     said.push(`<b>${dir}</b>, ${next.k === "H" ? "high" : "low"} at ${fmtT(next.t)} (${next.h.toFixed(1)} m)${sb ? (sb.open ? `, <b>above the S-bend OK</b> until ${fmtT(sb.until)}` : `, <b>stay below the S-bend</b> until ${fmtT(sb.from)}`) : ""}`);
   }
 
-  // Stream
-  const latest = FLOW && FLOW.latest ? { t: FLOW.latest.t * 1000, v: FLOW.latest.v } : null;
-  const past = flowAt(ms);
-  const future = latest && ms > Math.max(latest.t, nowMs) + 45 * MIN;
-  if (!latest) {
-    $("flowStats").innerHTML = ""; $("flowChart").innerHTML = "";
-    $("flowText").innerHTML = `<span class="msg">Flow data unavailable${flowErr ? ` (${esc(flowErr)})` : ""}. Rain below is the best guide.</span>`;
-    $("flowAge").textContent = "";
+  // Stream (from rain)
+  const r6 = rainBetween(ms - 6 * H, ms), r24 = rainBetween(ms - 24 * H, ms), r7 = rainBetween(ms - 7 * DAY, ms);
+  const future = ms > nowMs + 45 * MIN, fc = streamFromRain(r6);
+  if (!WX) {
+    $("rainStats").innerHTML = `<div class="msg">${wxErr ? `Rain data unavailable (${esc(wxErr)}).` : "Loading rain…"}</div>`;
+    $("rainText").innerHTML = ""; $("rainChart").innerHTML = ""; $("rainNote").textContent = "";
+    chips.push(chip("Stream", "—", wxErr ? "No rain data" : "Loading…", "na"));
   } else {
-    const ref = !future && past ? past : latest;
-    const fc = flowClass(ref.v);
-    const med = FLOW.baseline ? FLOW.baseline.percentiles["50"] : null;
-    const hr1 = flowAt(ref.t - H);
-    let trend = "";
-    if (hr1) trend = ref.v > hr1.v * 1.1 ? "rising" : ref.v < hr1.v * 0.9 ? "falling" : "steady";
-    let peak = FLOW.series.reduce((a, s) => s[2] > a[1] ? [s[0] * 1000, s[2]] : a, [0, 0]);
-    const age = nowMs - latest.t;
-    $("flowAge").textContent = `Gauge reading ${fmtDur(age)} ago${flowLive ? "" : " (cached copy)"}${age > 3 * H ? " · stale" : ""}`;
-    // The Whau is a small urban catchment: it rises within hours of heavy rain and drops back
-    // within about a day, so rain in the 24-48 h before the chosen time is what matters.
-    const r24 = rainBetween(ms - 24 * H, ms), r48 = rainBetween(ms - 48 * H, ms);
-    $("flowStats").innerHTML =
-      stat(future ? "Flow now" : "Flow", `${fmtFlow(ref.v)} m³/s`, `<span class="tag ${fc.cls}">${fc.label}</span> ${med ? `${(ref.v / med).toFixed(ref.v / med < 10 ? 1 : 0)}× typical` : ""}${trend ? `, ${trend}` : ""}`) +
-      stat("7-day peak", `${fmtFlow(peak[1])} m³/s`, peak[0] ? fmtDT(peak[0]) : "") +
-      stat(`Rain, 24 h before${future ? " (forecast)" : ""}`, r24 == null ? "—" : `${r24.toFixed(0)} mm`, r48 == null ? "" : `${r48.toFixed(0)} mm over 48 h`);
-    let txt = "", outlook = null;
-    if (future) {
-      const a24 = r24 ?? 0, a48 = r48 ?? 0, soon = ms - latest.t < 24 * H;
-      outlook = a24 >= 25 || a48 >= 40 ? { cls: "bad", label: "Likely high", txt: "Heavy rain is forecast in the day or two before then. Expect the stream to be high, with debris, especially on the ebb." }
-        : a24 >= 10 || a48 >= 20 ? { cls: "warn", label: "Likely up", txt: "Decent rain is forecast in the day or two before then, so the stream will probably be up." }
-        : soon && fc.cls !== "good" ? { cls: "warn", label: "Easing", txt: "Little rain forecast. The stream is up now but the Whau drops back within a day or so, so it should be easing." }
-        : { cls: "good", label: "Likely normal", txt: "Little rain forecast in the day or two before then, so the stream should be at normal levels." };
-      txt = `<b>Outlook:</b> ${outlook.txt} This is a guide from the rain forecast, not a flow prediction.`;
-    } else if (fc.cls !== "good") {
-      txt = "Fresh water is coming down. Expect a stronger ebb and less flood tide in the upper river, plus floating debris.";
-    }
-    $("flowText").innerHTML = txt;
-    $("flowChart").innerHTML = flowChart(ms);
-    if (outlook) {
-      chips.push(chip("Stream", outlook.label, `${r24 == null ? "" : `${r24.toFixed(0)} mm rain in the 24 h before · `}${fmtFlow(latest.v)} m³/s now`, outlook.cls));
-      said.push(`stream <b>${outlook.label.toLowerCase()}</b>${r24 == null ? "" : ` (${r24.toFixed(0)} mm rain in the 24 h before)`}`);
-    } else {
-      chips.push(chip("Stream", fc.label, `${fmtFlow(ref.v)} m³/s${med ? ` · ${(ref.v / med).toFixed(ref.v / med < 10 ? 1 : 0)}× typical` : ""}${trend ? `, ${trend}` : ""}`, fc.cls));
-      said.push(`stream <b>${fc.label.toLowerCase()}</b>${trend ? `, ${trend}` : ""}`);
-    }
+    const lr = lastRain(ms);
+    const lrTxt = lr == null ? "None in the past week" : ms - lr < H ? (future ? "Forecast that hour" : "Raining now") : `${fmtDur(ms - lr)} before`;
+    $("rainStats").innerHTML =
+      stat(`Rain, 6 h before${future ? " (forecast)" : ""}`, r6 == null ? "—" : `${r6.toFixed(1)} mm`, `<span class="tag ${fc.cls}">Stream ${fc.label.toLowerCase()}</span>`) +
+      stat("Rain, 24 h", r24 == null ? "—" : `${r24.toFixed(0)} mm`, "") +
+      stat("Rain, 7 days", r7 == null ? "—" : `${r7.toFixed(0)} mm`, "") +
+      stat("Last rain", lr == null ? "—" : ms - lr < H ? (future ? fmtT(ms) : "Now") : fmtT(lr), lrTxt);
+    $("rainText").innerHTML = fc.cls === "bad" ? "Heavy rain in the last few hours: expect the stream to be running hard, with a stronger ebb, weaker flood and debris in the upper river."
+      : fc.cls === "warn" ? "Enough recent rain for the stream to be up: a stronger ebb in the upper river and some debris."
+      : "";
+    $("rainChart").innerHTML = rainChart(ms);
+    $("rainNote").textContent = `Modelled rain at the club · shaded: the 6 h that count`;
+    const lab = future && fc.cls !== "na" ? `Likely ${fc.label.toLowerCase()}` : fc.label;
+    chips.push(chip("Stream", lab, `${r6 == null ? "?" : r6.toFixed(1)} mm rain in the 6 h before${r24 != null && r24 >= 1 ? ` · ${r24.toFixed(0)} mm in 24 h` : ""}`, fc.cls));
+    said.push(`stream <b>${lab.toLowerCase()}</b>`);
   }
 
   // Weather
@@ -693,10 +658,10 @@ function initSettings() {
   };
   initSettings();
   update();
-  Promise.allSettled([loadWeather().then(update), loadFlow().then(update)]);
+  loadWeather().then(update);
   let rz; addEventListener("resize", () => { clearTimeout(rz); rz = setTimeout(update, 150); });
   // Keep "now" current and data fresh while the page is open.
   setInterval(() => { if (selMs == null) update(); }, MIN);
-  setInterval(() => { loadWeather().then(update); loadFlow().then(update); }, 15 * MIN);
+  setInterval(() => { loadWeather().then(update); }, 15 * MIN);
 })();
 </script>
